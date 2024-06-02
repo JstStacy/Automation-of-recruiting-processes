@@ -1,0 +1,163 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+import seaborn as sns
+import time
+
+# Зчитування даних з файлу CSV
+data = pd.read_csv('/Users/stacy/Documents/Code/stackoverflow_full.csv')
+
+# Розділення даних на вхідні та вихідні змінні
+X = data[['Employment', 'MainBranch', 'YearsCode', 'PreviousSalary', 'HaveWorkedWith']].copy()
+y = data['Employed']
+
+# Застосування Label Encoding до категоріальних ознак
+label_encoder = LabelEncoder()
+X['HaveWorkedWith'] = label_encoder.fit_transform(X['HaveWorkedWith'])
+X['MainBranch'] = label_encoder.fit_transform(X['MainBranch'])
+
+# Функція для навчання і оцінки моделі
+def evaluate_model(X_train, y_train, X_test, y_test, add_noise=False):
+    if add_noise:
+        noise = np.random.normal(loc=0, scale=1, size=len(X_train))
+        X_train = X_train.copy()
+        X_train['HaveWorkedWith'] = X_train['HaveWorkedWith'] + noise
+
+    # Навчання моделі
+    start_time = time.time()
+    model = SVC(random_state=0)
+    model.fit(X_train, y_train)
+    training_time = time.time() - start_time
+
+    # Оцінка стійкості моделі до перенавчання за допомогою крос-валідації
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    cv_mean = cv_scores.mean()
+
+    # Прогнозування
+    start_time = time.time()
+    y_pred = model.predict(X_test)
+    prediction_time = time.time() - start_time
+
+    # Оцінка точності та F1-оцінки
+    accuracy = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+
+    # Матриця плутанини
+    conf_matrix = confusion_matrix(y_test, y_pred)
+
+    return training_time, prediction_time, accuracy, f1, cv_mean, conf_matrix
+
+# Масиви для зберігання метрик для чистих і зашумлених даних
+metrics_clean = {'training_times': [], 'prediction_times': [], 'accuracies': [], 'f1_scores': [], 'cv_means': [], 'confusion_matrices': []}
+metrics_noisy = {'training_times': [], 'prediction_times': [], 'accuracies': [], 'f1_scores': [], 'cv_means': [], 'confusion_matrices': []}
+
+# Виконання 20 ітерацій навчання та оцінки моделі
+for i in range(20):
+    # Розділення на навчальний та тестовий набори
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=i)
+
+    # Оцінка моделі на чистих даних
+    clean_results = evaluate_model(X_train, y_train, X_test, y_test)
+    for key, value in zip(metrics_clean.keys(), clean_results):
+        metrics_clean[key].append(value)
+
+    print(f"Ітерація {i+1} (чисті дані):")
+    print(f"Оцінка стійкості моделі до перенавчання (середнє по 5 фолдам): {clean_results[4]}")
+    print(f"Час навчання моделі: {clean_results[0]} сек")
+    print(f"Час прогнозування на тестових даних: {clean_results[1]} сек")
+    print(f"Точність моделі на тестових даних: {clean_results[2]}")
+    print(f"F1-оцінка моделі на тестових даних: {clean_results[3]}")
+    print(f"Матриця плутанини:\n{clean_results[5]}")
+
+    # Оцінка моделі на зашумлених даних
+    noisy_results = evaluate_model(X_train, y_train, X_test, y_test, add_noise=True)
+    for key, value in zip(metrics_noisy.keys(), noisy_results):
+        metrics_noisy[key].append(value)
+
+    print(f"Ітерація {i+1} (зашумлені дані):")
+    print(f"Оцінка стійкості моделі до перенавчання (середнє по 5 фолдам): {noisy_results[4]}")
+    print(f"Час навчання моделі: {noisy_results[0]} сек")
+    print(f"Час прогнозування на тестових даних: {noisy_results[1]} сек")
+    print(f"Точність моделі на тестових даних: {noisy_results[2]}")
+    print(f"F1-оцінка моделі на тестових даних: {noisy_results[3]}")
+    print(f"Матриця плутанини:\n{noisy_results[5]}")
+
+# Обчислення середньої матриці плутанини
+mean_conf_matrix_clean = np.mean(metrics_clean['confusion_matrices'], axis=0)
+mean_conf_matrix_noisy = np.mean(metrics_noisy['confusion_matrices'], axis=0)
+
+# Побудова графіків зміни показників у кожній ітерації
+iterations = np.arange(1, 21)
+
+plt.figure(figsize=(24, 18))
+
+plt.subplot(3, 3, 1)
+plt.plot(iterations, metrics_clean['accuracies'], marker='o', label='Точність (чисті дані)')
+plt.xlabel('Ітерація')
+plt.ylabel('Значення точності')
+plt.title('Зміни точності у кожній ітерації (чисті дані)')
+plt.legend()
+
+plt.subplot(3, 3, 2)
+plt.plot(iterations, metrics_clean['f1_scores'], marker='x', label='F1-оцінка (чисті дані)')
+plt.xlabel('Ітерація')
+plt.ylabel('Значення F1-оцінки')
+plt.title('Зміни F1-оцінки у кожній ітерації (чисті дані)')
+plt.legend()
+
+plt.subplot(3, 3, 3)
+plt.plot(iterations, metrics_clean['training_times'], marker='o', label='Час навчання (сек)')
+plt.plot(iterations, metrics_clean['prediction_times'], marker='x', label='Час прогнозування (сек)')
+plt.xlabel('Ітерація')
+plt.ylabel('Час (сек)')
+plt.title('Зміни часу навчання та прогнозування у кожній ітерації (чисті дані)')
+plt.legend()
+
+plt.subplot(3, 3, 4)
+plt.plot(iterations, metrics_noisy['accuracies'], marker='o', label='Точність (зашумлені дані)')
+plt.xlabel('Ітерація')
+plt.ylabel('Значення точності')
+plt.title('Зміни точності у кожній ітерації (зашумлені дані)')
+plt.legend()
+
+plt.subplot(3, 3, 5)
+plt.plot(iterations, metrics_noisy['f1_scores'], marker='x', label='F1-оцінка (зашумлені дані)')
+plt.xlabel('Ітерація')
+plt.ylabel('Значення F1-оцінки')
+plt.title('Зміни F1-оцінки у кожній ітерації (зашумлені дані)')
+plt.legend()
+
+plt.subplot(3, 3, 6)
+plt.plot(iterations, metrics_noisy['training_times'], marker='o', label='Час навчання (сек)')
+plt.plot(iterations, metrics_noisy['prediction_times'], marker='x', label='Час прогнозування (сек)')
+plt.xlabel('Ітерація')
+plt.ylabel('Час (сек)')
+plt.title('Зміни часу навчання та прогнозування у кожній ітерації (зашумлені дані)')
+plt.legend()
+
+plt.subplot(3, 3, 7)
+plt.plot(iterations, metrics_clean['cv_means'], marker='o', label='CV середнє (чисті дані)')
+plt.plot(iterations, metrics_noisy['cv_means'], marker='x', label='CV середнє (зашумлені дані)')
+plt.xlabel('Ітерація')
+plt.ylabel('CV середнє значення')
+plt.title('Зміни стійкості до перенавчання (CV) у кожній ітерації')
+plt.legend()
+
+plt.subplot(3, 3, 8)
+sns.heatmap(mean_conf_matrix_clean, annot=True, fmt='g')
+plt.xlabel('Прогнозований клас')
+plt.ylabel('Справжній клас')
+plt.title('Середня матриця плутанини (чисті дані)')
+
+plt.subplot(3, 3, 9)
+sns.heatmap(mean_conf_matrix_noisy, annot=True, fmt='g')
+plt.xlabel('Прогнозований клас')
+plt.ylabel('Справжній клас')
+plt.title('Середня матриця плутанини (зашумлені дані)')
+
+plt.tight_layout()
+plt.show()
